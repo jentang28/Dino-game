@@ -55,6 +55,11 @@ canvas {
 canvas:focus-visible { box-shadow: 0 0 0 4px var(--dino); }
 .help { font-size: 14px; margin: 0; line-height: 1.5; }
 kbd { font-family: var(--font-display); font-size: 10px; background: #fff; border: 2px solid var(--ink); border-radius: 4px; padding: 2px 6px; }
+.levels { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.levels li { background: rgba(255,122,0,.1); border: 2px solid rgba(74,36,8,.2); border-radius: 8px; padding: 8px 10px; font-size: 14px; font-weight: 700; display: grid; gap: 2px; }
+.levels b { font-family: var(--font-display); font-size: 10px; color: var(--dino-dark); }
+.levels span { font-weight: 500; font-size: 13px; }
+ol#top .lv { font-family: var(--font-display); font-size: 9px; align-self: center; opacity: .7; }
 .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
 .panel { background: #fff; border: 3px solid var(--ink); border-radius: 10px; padding: 14px 16px; min-width: 0; }
 .panel h2 { font-family: var(--font-display); font-size: 12px; margin: 0 0 12px; letter-spacing: .04em; }
@@ -65,7 +70,7 @@ kbd { font-family: var(--font-display); font-size: 10px; background: #fff; borde
 #submit input:focus-visible, #submit button:focus-visible { outline: 3px solid var(--cactus); outline-offset: 2px; }
 .note { font-size: 14px; margin: 8px 0 0; }
 ol#top { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-variant-numeric: tabular-nums; }
-ol#top li { display: grid; grid-template-columns: 2.2em 1fr auto; gap: 8px; padding: 4px 0; border-bottom: 1px dashed rgba(74,36,8,.25); }
+ol#top li { display: grid; grid-template-columns: 2.2em 1fr auto auto; gap: 8px; padding: 4px 0; border-bottom: 1px dashed rgba(74,36,8,.25); }
 ol#top li:last-child { border-bottom: 0; }
 ol#top .rank { font-family: var(--font-display); font-size: 10px; align-self: center; }
 ol#top .who { overflow-wrap: anywhere; }
@@ -77,10 +82,16 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
 <div class="wrap">
   <header>
     <h1>Sunset Dino Runner</h1>
-    <div class="scores"><div><span>HI</span> <b id="hi">00000</b></div><div><span>SCORE</span> <b id="score">00000</b></div></div>
+    <div class="scores"><div><span>LV</span> <b id="lv">1</b></div><div><span>HI</span> <b id="hi">00000</b></div><div><span>SCORE</span> <b id="score">00000</b></div></div>
   </header>
-  <canvas id="game" width="800" height="240" tabindex="0" aria-label="Dino runner game. Press space or tap to jump."></canvas>
-  <p class="help">Press <kbd>Space</kbd> or <kbd>↑</kbd> to jump, hold <kbd>↓</kbd> to drop faster. On a phone, tap the game. The pace picks up as your score climbs.</p>
+  <canvas id="game" width="800" height="240" tabindex="0" aria-label="Dino runner game. Press space or tap to jump, hold down arrow to duck."></canvas>
+  <p class="help">Press <kbd>Space</kbd> or <kbd>↑</kbd> to jump. Hold <kbd>↓</kbd> to duck, or to drop faster mid-air. On a phone, tap to jump and hold the bottom of the game to duck.</p>
+  <ol class="levels" aria-label="Levels">
+    <li><b>Lv 1</b> Desert Walk<span>cacti · 10 pts each</span></li>
+    <li><b>Lv 2</b> Cactus Patch<span>clusters, rocks · 20 pts · from 200</span></li>
+    <li><b>Lv 3</b> Bird Alley<span>low birds · 40 pts · from 600</span></li>
+    <li><b>Lv 4</b> Dust Storm<span>tumbleweeds · 80 pts · from 1,600</span></li>
+  </ol>
   <div class="board">
     <section class="panel" aria-labelledby="save-h">
       <h2 id="save-h">SAVE YOUR SCORE</h2>
@@ -115,60 +126,106 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
   const pad = n => String(Math.floor(n)).padStart(5, '0');
   hiEl.textContent = pad(hi);
 
-  const dino = { x: 70, y: GROUND, vy: 0, w: 44, h: 46, onGround: true, fastDrop: false };
+  const LEVELS = [
+    { n: 1, name: 'DESERT WALK',  from: 0,    pts: 10, speed: [6, 7.5],    ramp: 20, gap: 1.0,  sky: ['#ffb15c', '#ffe0b8'], types: ['cactus'] },
+    { n: 2, name: 'CACTUS PATCH', from: 200,  pts: 20, speed: [7.5, 9],    ramp: 20, gap: 0.9,  sky: ['#ff9a3c', '#ffd29a'], types: ['cactus', 'cluster', 'cluster', 'rock'] },
+    { n: 3, name: 'BIRD ALLEY',   from: 600,  pts: 40, speed: [9, 10.5],   ramp: 25, gap: 0.8,  sky: ['#f47f45', '#ffc98f'], types: ['cactus', 'cluster', 'rock', 'bird', 'bird'] },
+    { n: 4, name: 'DUST STORM',   from: 1600, pts: 80, speed: [10.5, 13.5], ramp: 40, gap: 0.72, sky: ['#d9763a', '#f2c08a'], types: ['cluster', 'cactus', 'bird', 'tumble', 'tumble'] }
+  ];
+  const lvEl = document.getElementById('lv');
+
+  const dino = { x: 70, y: GROUND, vy: 0, onGround: true, down: false };
   let state = 'ready'; // ready | running | over
-  let speed, score, obstacles, spawnIn, groundOff, t, clouds;
+  let speed, score, level, clearedInLevel, obstacles, spawnIn, groundOff, t, clouds, banner, dust;
 
   function reset() {
-    speed = 6; score = 0; obstacles = []; spawnIn = 60; groundOff = 0; t = 0;
+    score = 0; level = 0; clearedInLevel = 0; speed = LEVELS[0].speed[0];
+    obstacles = []; spawnIn = 60; groundOff = 0; t = 0; banner = 0;
     dino.y = GROUND; dino.vy = 0; dino.onGround = true;
-    clouds = [0,1,2].map(i => ({ x: 120 + i * 280, y: 30 + (i % 2) * 28 }));
+    clouds = [0, 1, 2].map(i => ({ x: 120 + i * 280, y: 30 + (i % 2) * 28 }));
+    dust = Array.from({ length: 40 }, () => ({ x: Math.random() * W, y: Math.random() * GROUND, s: 0.6 + Math.random() * 1.4 }));
+    lvEl.textContent = '1';
+    scoreEl.textContent = pad(0);
   }
   reset();
 
+  function start() {
+    reset(); state = 'running'; banner = 120;
+    saveBtn.disabled = true;
+    if (pending) note.textContent = 'Unsaved score discarded. Finish this run to save a new one.';
+    pending = 0;
+  }
   function jump() {
-    if (state === 'ready' || state === 'over') { reset(); state = 'running'; saveBtn.disabled = true; if (pending) note.textContent = 'Unsaved score discarded. Finish this run to save a new one.'; pending = 0; return; }
+    if (state !== 'running') { start(); return; }
     if (dino.onGround) { dino.vy = -13.2; dino.onGround = false; }
   }
+  const ducking = () => dino.down && dino.onGround && state === 'running';
 
+  const typing = e => e.target.closest && e.target.closest('input, button, textarea');
   addEventListener('keydown', e => {
-    if (e.target.closest && e.target.closest('input, button, textarea')) return;
-    if (['Space','ArrowUp','KeyW'].includes(e.code)) { e.preventDefault(); if (!e.repeat) jump(); }
-    if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); dino.fastDrop = true; }
+    if (typing(e)) return;
+    if (['Space', 'ArrowUp', 'KeyW'].includes(e.code)) { e.preventDefault(); if (!e.repeat) jump(); }
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); dino.down = true; }
   });
   addEventListener('keyup', e => {
-    if (e.target.closest && e.target.closest('input, button, textarea')) return; if (e.code === 'ArrowDown' || e.code === 'KeyS') dino.fastDrop = false; });
-  cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.focus(); jump(); });
+    if (typing(e)) return;
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') dino.down = false;
+  });
+  cv.addEventListener('pointerdown', e => {
+    e.preventDefault(); cv.focus();
+    const r = cv.getBoundingClientRect();
+    if (state === 'running' && (e.clientY - r.top) / r.height > 0.65) { dino.down = true; return; }
+    jump();
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => cv.addEventListener(ev, () => { dino.down = false; }));
+
+  // ---------- obstacles ----------
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  const CACTI = [{ w: 22, h: 44 }, { w: 26, h: 54 }, { w: 22, h: 36 }];
 
   function spawn() {
-    const kinds = [
-      { w: 22, h: 44 }, { w: 26, h: 54 }, { w: 22, h: 36 }
-    ];
-    const count = score > 300 && Math.random() < 0.35 ? (Math.random() < 0.4 ? 3 : 2) : 1;
-    let x = W + 20;
-    for (let i = 0; i < count; i++) {
-      const k = kinds[Math.floor(Math.random() * kinds.length)];
-      obstacles.push({ x, w: k.w, h: k.h, arms: Math.random() < 0.5 ? 1 : -1 });
-      x += k.w + 4;
+    const L = LEVELS[level], type = pick(L.types), x = W + 20;
+    if (type === 'cactus') {
+      const k = pick(CACTI);
+      obstacles.push({ type, x, w: k.w, h: k.h, top: GROUND - k.h, parts: [{ dx: 0, ...k }] });
+    } else if (type === 'cluster') {
+      const n = level >= 3 && Math.random() < 0.5 ? 3 : 2;
+      let dx = 0, parts = [];
+      for (let i = 0; i < n; i++) { const k = pick(CACTI); parts.push({ dx, ...k }); dx += k.w + 3; }
+      const h = Math.max(...parts.map(p => p.h));
+      obstacles.push({ type, x, w: dx - 3, h, top: GROUND - h, parts });
+    } else if (type === 'rock') {
+      obstacles.push({ type, x, w: 36, h: 22, top: GROUND - 22 });
+    } else if (type === 'bird') {
+      // low: jump it · mid: duck or jump · high: run underneath
+      const lift = pick([12, 40, 40, 78]);
+      obstacles.push({ type, x, w: 40, h: 22, top: GROUND - lift - 22, flap: Math.random() * 20, drift: 0.6 + Math.random() * 0.8 });
+    } else {
+      obstacles.push({ type: 'tumble', x, w: 30, h: 30, top: GROUND - 30, by: 0, bvy: -6, roll: 0 });
     }
-    const minGap = 55 + 260 / speed;
-    spawnIn = minGap + Math.random() * 70;
+    const base = (55 + 260 / speed) * L.gap;
+    spawnIn = base + Math.random() * 70 * L.gap;
   }
 
+  function dinoBox() {
+    if (ducking()) return { x: dino.x + 2, y: GROUND - 26, w: 54, h: 26 };
+    return { x: dino.x + 8, y: dino.y - 40, w: 28, h: 38 };
+  }
   function hit(o) {
-    // forgiving hitbox
-    const dx = dino.x + 8, dy = dino.y - dino.h + 6, dw = dino.w - 16, dh = dino.h - 8;
-    const ox = o.x + 3, oy = GROUND - o.h + 3, ow = o.w - 6, oh = o.h - 3;
-    return dx < ox + ow && dx + dw > ox && dy < oy + oh && dy + dh > oy;
+    const d = dinoBox();
+    const ox = o.x + 4, oy = o.top + 4, ow = o.w - 8, oh = o.h - 6;
+    return d.x < ox + ow && d.x + d.w > ox && d.y < oy + oh && d.y + d.h > oy;
   }
 
   function update() {
     t++;
+    dust.forEach(p => { p.x -= p.s * (state === 'running' ? speed * 0.6 : 1); if (p.x < 0) { p.x = W; p.y = Math.random() * GROUND; } });
     if (state !== 'running') return;
-    speed = Math.min(15, 6 + score / 250);
-    score += speed * 0.08;
+    const L = LEVELS[level];
+    speed = L.speed[0] + (L.speed[1] - L.speed[0]) * Math.min(1, clearedInLevel / L.ramp);
+    if (banner > 0) banner--;
 
-    dino.vy += dino.fastDrop && !dino.onGround ? 1.8 : 0.7;
+    dino.vy += dino.down && !dino.onGround ? 1.8 : 0.7;
     dino.y += dino.vy;
     if (dino.y >= GROUND) { dino.y = GROUND; dino.vy = 0; dino.onGround = true; }
 
@@ -176,33 +233,45 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
     clouds.forEach(c => { c.x -= speed * 0.15; if (c.x < -80) c.x = W + Math.random() * 120; });
 
     if (--spawnIn <= 0) spawn();
-    obstacles.forEach(o => o.x -= speed);
-    obstacles = obstacles.filter(o => o.x + o.w > -10);
+    obstacles.forEach(o => {
+      if (o.type === 'bird') { o.x -= speed + o.drift; o.flap++; }
+      else if (o.type === 'tumble') {
+        o.x -= speed * 1.2; o.roll += speed * 0.08;
+        o.bvy += 0.45; o.by += o.bvy;
+        if (o.by > 0) { o.by = 0; o.bvy = -(4 + Math.random() * 4); }
+        o.top = GROUND - 30 + o.by;
+      } else o.x -= speed;
+      if (!o.scored && o.x + o.w < dino.x) {
+        o.scored = true;
+        score += LEVELS[level].pts; clearedInLevel++;
+        const next = LEVELS[level + 1];
+        if (next && score >= next.from) { level++; clearedInLevel = 0; banner = 150; lvEl.textContent = String(level + 1); }
+      }
+    });
+    obstacles = obstacles.filter(o => o.x + o.w > -20);
 
     if (obstacles.some(hit)) {
       state = 'over';
-      if (score > hi) { hi = Math.floor(score); try { localStorage.setItem('sunsetRunnerHi', hi); } catch (e) {} }
+      if (score > hi) { hi = score; try { localStorage.setItem('sunsetRunnerHi', hi); } catch (e) {} }
       hiEl.textContent = pad(hi);
-      onGameOver(Math.floor(score));
+      onGameOver(score, level + 1);
     }
     scoreEl.textContent = pad(score);
   }
 
   // ---------- drawing ----------
   function drawSky() {
+    const sky = LEVELS[level].sky;
     const g = ctx.createLinearGradient(0, 0, 0, GROUND);
-    g.addColorStop(0, C.skyT); g.addColorStop(1, C.skyB);
+    g.addColorStop(0, sky[0]); g.addColorStop(1, sky[1]);
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    // low sun
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.beginPath(); ctx.arc(660, 120, 46, 0, Math.PI * 2); ctx.fill();
-    // distant mesas
+    ctx.beginPath(); ctx.arc(660, 120 + level * 12, 46, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = 'rgba(184,96,31,0.28)';
     ctx.beginPath(); ctx.moveTo(0, GROUND);
     [[0,170],[60,170],[80,150],[180,150],[200,175],[360,175],[380,140],[470,140],[490,170],[640,170],[660,155],[760,155],[780,172],[800,172],[800,GROUND]]
-      .forEach(([x,y]) => ctx.lineTo(x, y));
+      .forEach(([x, y]) => ctx.lineTo(x, y));
     ctx.fill();
-    // clouds
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     clouds.forEach(c => {
       ctx.beginPath();
@@ -211,7 +280,11 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
       ctx.fill();
     });
   }
-
+  function drawDust() {
+    if (level < 3 || reduce) return;
+    ctx.fillStyle = 'rgba(160,90,40,0.35)';
+    dust.forEach(p => ctx.fillRect(p.x, p.y, 6 * p.s, 1.5));
+  }
   function drawGround() {
     ctx.fillStyle = C.sand; ctx.fillRect(0, GROUND, W, H - GROUND);
     ctx.fillStyle = C.sandD; ctx.fillRect(0, GROUND, W, 3);
@@ -224,76 +297,98 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
 
   function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); }
 
-  // Original chunky, rounded dinosaur
   function drawDino() {
-    const x = dino.x, base = dino.y;
+    const x = dino.x;
     const running = state === 'running' && dino.onGround;
     const step = running && !reduce ? Math.floor(t / 5) % 2 : 0;
+    if (ducking()) {
+      const y = GROUND - 28;
+      ctx.fillStyle = C.dino;
+      ctx.beginPath(); ctx.moveTo(x + 2, y + 12); ctx.quadraticCurveTo(x - 14, y + 10, x - 12, y + 20); ctx.lineTo(x + 6, y + 20); ctx.fill();
+      ctx.fillStyle = C.dinoD;
+      [[12, 2], [22, 0]].forEach(([dx, dy]) => { ctx.beginPath(); ctx.moveTo(x + dx - 4, y + dy + 7); ctx.lineTo(x + dx, y + dy); ctx.lineTo(x + dx + 4, y + dy + 7); ctx.fill(); });
+      ctx.fillStyle = C.dino; rr(x, y + 6, 40, 18, 9); rr(x + 34, y + 4, 22, 16, 8);
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 47, y + 10, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(x + 48, y + 10, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = C.dinoD; rr(x + 8, y + 22, 8, step ? 4 : 6, 3); rr(x + 22, y + 22, 8, step ? 6 : 4, 3);
+      return;
+    }
     const bob = running && !reduce ? (step ? 1 : 0) : 0;
-    const y = base - 46 + bob;
-
-    // tail
+    const y = dino.y - 46 + bob;
     ctx.fillStyle = C.dino;
     ctx.beginPath(); ctx.moveTo(x + 2, y + 22); ctx.quadraticCurveTo(x - 14, y + 18, x - 12, y + 32); ctx.lineTo(x + 8, y + 34); ctx.fill();
-    // back plates
     ctx.fillStyle = C.dinoD;
-    [[10,10],[18,6],[26,8]].forEach(([dx, dy]) => {
-      ctx.beginPath(); ctx.moveTo(x + dx - 4, y + dy + 8); ctx.lineTo(x + dx, y + dy); ctx.lineTo(x + dx + 4, y + dy + 8); ctx.fill();
-    });
-    // body
+    [[10, 10], [18, 6], [26, 8]].forEach(([dx, dy]) => { ctx.beginPath(); ctx.moveTo(x + dx - 4, y + dy + 8); ctx.lineTo(x + dx, y + dy); ctx.lineTo(x + dx + 4, y + dy + 8); ctx.fill(); });
     ctx.fillStyle = C.dino; rr(x, y + 12, 34, 26, 13);
-    // belly
     ctx.fillStyle = 'rgba(255,240,210,0.7)'; rr(x + 14, y + 24, 16, 12, 6);
-    // head
     ctx.fillStyle = C.dino; rr(x + 24, y, 22, 20, 9);
-    // eye
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 37, y + 8, 4.5, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = C.ink; ctx.beginPath();
     if (state === 'over') { ctx.lineWidth = 2; ctx.strokeStyle = C.ink; ctx.moveTo(x + 34, y + 5); ctx.lineTo(x + 40, y + 11); ctx.moveTo(x + 40, y + 5); ctx.lineTo(x + 34, y + 11); ctx.stroke(); }
     else { ctx.arc(x + 38, y + 8, 2.2, 0, Math.PI * 2); ctx.fill(); }
-    // smile + nostril
     ctx.fillStyle = C.dinoD; ctx.fillRect(x + 36, y + 15, 7, 2); ctx.fillRect(x + 42, y + 5, 2, 2);
-    // little arm
-    ctx.fillStyle = C.dinoD; rr(x + 30, y + 24, 7, 4, 2);
-    // legs
-    ctx.fillStyle = C.dinoD;
+    rr(x + 30, y + 24, 7, 4, 2);
     const l1 = step ? 4 : 8, l2 = step ? 8 : 4;
-    rr(x + 8, y + 34, 8, l1 + 4, 3);
-    rr(x + 20, y + 34, 8, l2 + 4, 3);
+    rr(x + 8, y + 34, 8, l1 + 4, 3); rr(x + 20, y + 34, 8, l2 + 4, 3);
   }
 
-  function drawCactus(o) {
-    const x = o.x, top = GROUND - o.h, w = o.w, armH = Math.round(o.h * 0.35);
+  function drawCactus(x, w, h) {
+    const top = GROUND - h, armH = Math.round(h * 0.35);
     ctx.fillStyle = C.cac;
-    const trunkW = Math.round(w * 0.45), tx = x + (w - trunkW) / 2;
-    rr(tx, top, trunkW, o.h, trunkW / 2);
-    // arms
-    const ay = top + o.h * 0.3;
-    rr(x, ay + armH * 0.4, tx - x + 2, 5, 2);
-    rr(x, ay - 2, 5, armH, 2.5);
-    rr(tx + trunkW - 2, ay + armH * 0.7, x + w - (tx + trunkW) + 2, 5, 2);
-    rr(x + w - 5, ay + 4, 5, armH, 2.5);
-    // ribs
-    ctx.fillStyle = C.cacD;
-    ctx.fillRect(tx + trunkW / 2 - 1, top + 5, 2, o.h - 8);
+    const trunkW = Math.round(w * 0.45), tx = x + (w - trunkW) / 2, ay = top + h * 0.3;
+    rr(tx, top, trunkW, h, trunkW / 2);
+    rr(x, ay + armH * 0.4, tx - x + 2, 5, 2); rr(x, ay - 2, 5, armH, 2.5);
+    rr(tx + trunkW - 2, ay + armH * 0.7, x + w - (tx + trunkW) + 2, 5, 2); rr(x + w - 5, ay + 4, 5, armH, 2.5);
+    ctx.fillStyle = C.cacD; ctx.fillRect(tx + trunkW / 2 - 1, top + 5, 2, h - 8);
+  }
+  function drawRock(o) {
+    ctx.fillStyle = '#8a5a3a';
+    ctx.beginPath(); ctx.moveTo(o.x, GROUND); ctx.lineTo(o.x + 4, o.top + 8); ctx.lineTo(o.x + 14, o.top); ctx.lineTo(o.x + 28, o.top + 4); ctx.lineTo(o.x + o.w, GROUND); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(o.x + 10, o.top + 5, 8, 3);
+  }
+  function drawBird(o) {
+    const cx = o.x + 20, cy = o.top + 12, up = Math.floor(o.flap / 8) % 2 === 0 && !reduce;
+    ctx.fillStyle = C.ink;
+    ctx.beginPath(); ctx.ellipse(cx, cy, 14, 6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx - 13, cy - 3, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = C.dino; ctx.beginPath(); ctx.moveTo(cx - 18, cy - 4); ctx.lineTo(cx - 24, cy - 2); ctx.lineTo(cx - 18, cy); ctx.fill();
+    ctx.fillStyle = C.ink; ctx.beginPath();
+    if (up) { ctx.moveTo(cx - 6, cy - 2); ctx.lineTo(cx + 4, cy - 12); ctx.lineTo(cx + 8, cy - 2); }
+    else { ctx.moveTo(cx - 6, cy + 2); ctx.lineTo(cx + 4, cy + 11); ctx.lineTo(cx + 8, cy + 2); }
+    ctx.fill();
+    ctx.beginPath(); ctx.moveTo(cx + 12, cy); ctx.lineTo(cx + 20, cy - 4); ctx.lineTo(cx + 20, cy + 4); ctx.fill();
+  }
+  function drawTumble(o) {
+    const cx = o.x + 15, cy = o.top + 15;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(-o.roll);
+    ctx.strokeStyle = '#7a4a1e'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.stroke();
+    for (let i = 0; i < 5; i++) { ctx.rotate(Math.PI / 5); ctx.beginPath(); ctx.ellipse(0, 0, 13, 5, 0, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.restore();
+  }
+  function drawObstacle(o) {
+    if (o.parts) o.parts.forEach(p => drawCactus(o.x + p.dx, p.w, p.h));
+    else if (o.type === 'rock') drawRock(o);
+    else if (o.type === 'bird') drawBird(o);
+    else drawTumble(o);
   }
 
   function centreText(lines) {
-    ctx.fillStyle = 'rgba(255,241,224,0.82)';
-    rr(W / 2 - 200, 52, 400, 90, 10);
+    ctx.fillStyle = 'rgba(255,241,224,0.86)';
+    rr(W / 2 - 220, 48, 440, 96, 10);
     ctx.fillStyle = C.ink; ctx.textAlign = 'center';
-    ctx.font = '16px "Press Start 2P", monospace';
-    ctx.fillText(lines[0], W / 2, 90);
-    ctx.font = '10px "Press Start 2P", monospace';
-    ctx.fillText(lines[1], W / 2, 118);
+    ctx.font = '16px "Press Start 2P", monospace'; ctx.fillText(lines[0], W / 2, 86);
+    ctx.font = '10px "Press Start 2P", monospace'; ctx.fillText(lines[1], W / 2, 116);
   }
 
   function draw() {
-    drawSky(); drawGround();
-    obstacles.forEach(drawCactus);
+    drawSky(); drawDust(); drawGround();
+    obstacles.forEach(drawObstacle);
     drawDino();
+    const L = LEVELS[level];
     if (state === 'ready') centreText(['READY?', 'SPACE OR TAP TO START']);
-    if (state === 'over') centreText(['GAME OVER', 'SPACE OR TAP TO RUN AGAIN']);
+    else if (state === 'over') centreText(['GAME OVER', 'LEVEL ' + L.n + ' · ' + score + ' PTS · TAP TO RETRY']);
+    else if (banner > 0) centreText(['LEVEL ' + L.n + ': ' + L.name, L.pts + ' PTS PER OBSTACLE']);
   }
 
 
@@ -307,27 +402,28 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
   let pending = 0;
   try { nameIn.value = localStorage.getItem('sunsetRunnerName') || ''; } catch (e) {}
 
-  function row(rank, who, pts) {
+  function row(rank, who, pts, lv = '') {
     const li = document.createElement('li');
-    [['rank', rank], ['who', who], ['pts', pts]].forEach(([c, v]) => { const sp = document.createElement('span'); sp.className = c; sp.textContent = v; li.append(sp); });
+    [['rank', rank], ['who', who], ['lv', lv], ['pts', pts]].forEach(([c, v]) => { const sp = document.createElement('span'); sp.className = c; sp.textContent = v; li.append(sp); });
     return li;
   }
   async function loadTop() {
     try {
-      const r = await fetch(SB_URL + '/rest/v1/dino_scores?select=name,score&order=score.desc,created_at.asc&limit=10', { headers: SB_HEAD });
+      const r = await fetch(SB_URL + '/rest/v1/dino_scores?select=name,score,level&order=score.desc,created_at.asc&limit=10', { headers: SB_HEAD });
       if (!r.ok) throw new Error(r.status);
       const rows = await r.json();
       list.replaceChildren();
       if (!rows.length) { list.append(row('', 'No scores yet. Be the first!', '')); return; }
-      rows.forEach((x, i) => list.append(row('#' + (i + 1), x.name, pad(x.score))));
+      rows.forEach((x, i) => list.append(row('#' + (i + 1), x.name, pad(x.score), 'LV' + (x.level || 1))));
     } catch (e) {
       list.replaceChildren(row('', 'Couldn’t load scores. Check your connection and refresh.', ''));
     }
   }
-  function onGameOver(s) {
-    pending = s;
+  let pendingLevel = 1;
+  function onGameOver(s, lv) {
+    pending = s; pendingLevel = lv;
     saveBtn.disabled = s < 1;
-    note.textContent = s < 1 ? 'Score at least 1 point to save.' : 'You scored ' + s + '. Add your name and press Save.';
+    note.textContent = s < 1 ? 'Clear at least one obstacle to save a score.' : 'You reached level ' + lv + ' with ' + s + ' points. Add your name and press Save.';
   }
   form.addEventListener('submit', async e => {
     e.preventDefault();
@@ -336,7 +432,7 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
     if (!pending) return;
     saveBtn.disabled = true; note.textContent = 'Saving…';
     try {
-      const r = await fetch(SB_URL + '/rest/v1/dino_scores', { method: 'POST', headers: { ...SB_HEAD, Prefer: 'return=minimal' }, body: JSON.stringify({ name, score: pending }) });
+      const r = await fetch(SB_URL + '/rest/v1/dino_scores', { method: 'POST', headers: { ...SB_HEAD, Prefer: 'return=minimal' }, body: JSON.stringify({ name, score: pending, level: pendingLevel }) });
       if (!r.ok) throw new Error(r.status);
       try { localStorage.setItem('sunsetRunnerName', name); } catch (e) {}
       note.textContent = 'Saved ' + pending + ' points for ' + name + '.';
