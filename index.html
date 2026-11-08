@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sunset Dino Runner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Nunito:wght@500;700&display=swap">
+<style>
+/* Layout: one centred game stage on a warm desert dusk; single deliberate warm theme */
+:root {
+  --sky-top: #ffb15c;
+  --sky-bottom: #ffe0b8;
+  --sand: #e8893a;
+  --sand-dark: #b8601f;
+  --dino: #ff7a00;
+  --dino-dark: #c24f00;
+  --cactus: #2f9e44;
+  --cactus-dark: #1d6b2c;
+  --ink: #4a2408;
+  --page: #fff1e0;
+  --font-display: "Press Start 2P", ui-monospace, "Courier New", monospace;
+  --font-body: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-body);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-block: 24px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  box-sizing: border-box;
+}
+.wrap { width: 100%; max-width: 860px; display: grid; gap: 14px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+h1 { font-family: var(--font-display); font-size: clamp(14px, 3vw, 20px); margin: 0; letter-spacing: 0.02em; text-wrap: balance; }
+.scores { font-family: var(--font-display); font-size: 12px; display: flex; gap: 16px; font-variant-numeric: tabular-nums; }
+.scores span { opacity: .7; }
+canvas {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 10px;
+  border: 3px solid var(--ink);
+  touch-action: manipulation;
+  cursor: pointer;
+  outline: none;
+}
+canvas:focus-visible { box-shadow: 0 0 0 4px var(--dino); }
+.help { font-size: 14px; margin: 0; line-height: 1.5; }
+kbd { font-family: var(--font-display); font-size: 10px; background: #fff; border: 2px solid var(--ink); border-radius: 4px; padding: 2px 6px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Sunset Dino Runner</h1>
+    <div class="scores"><div><span>HI</span> <b id="hi">00000</b></div><div><span>SCORE</span> <b id="score">00000</b></div></div>
+  </header>
+  <canvas id="game" width="800" height="240" tabindex="0" aria-label="Dino runner game. Press space or tap to jump."></canvas>
+  <p class="help">Press <kbd>Space</kbd> or <kbd>↑</kbd> to jump, hold <kbd>↓</kbd> to drop faster. On a phone, tap the game. The pace picks up as your score climbs.</p>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('game');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height, GROUND = 200;
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const C = {
+    skyT: css('--sky-top'), skyB: css('--sky-bottom'), sand: css('--sand'), sandD: css('--sand-dark'),
+    dino: css('--dino'), dinoD: css('--dino-dark'), cac: css('--cactus'), cacD: css('--cactus-dark'), ink: css('--ink')
+  };
+  const scoreEl = document.getElementById('score'), hiEl = document.getElementById('hi');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let hi = 0;
+  try { hi = +localStorage.getItem('sunsetRunnerHi') || 0; } catch (e) {}
+  const pad = n => String(Math.floor(n)).padStart(5, '0');
+  hiEl.textContent = pad(hi);
+
+  const dino = { x: 70, y: GROUND, vy: 0, w: 44, h: 46, onGround: true, fastDrop: false };
+  let state = 'ready'; // ready | running | over
+  let speed, score, obstacles, spawnIn, groundOff, t, clouds;
+
+  function reset() {
+    speed = 6; score = 0; obstacles = []; spawnIn = 60; groundOff = 0; t = 0;
+    dino.y = GROUND; dino.vy = 0; dino.onGround = true;
+    clouds = [0,1,2].map(i => ({ x: 120 + i * 280, y: 30 + (i % 2) * 28 }));
+  }
+  reset();
+
+  function jump() {
+    if (state === 'ready' || state === 'over') { reset(); state = 'running'; return; }
+    if (dino.onGround) { dino.vy = -13.2; dino.onGround = false; }
+  }
+
+  addEventListener('keydown', e => {
+    if (['Space','ArrowUp','KeyW'].includes(e.code)) { e.preventDefault(); if (!e.repeat) jump(); }
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); dino.fastDrop = true; }
+  });
+  addEventListener('keyup', e => { if (e.code === 'ArrowDown' || e.code === 'KeyS') dino.fastDrop = false; });
+  cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.focus(); jump(); });
+
+  function spawn() {
+    const kinds = [
+      { w: 22, h: 44 }, { w: 26, h: 54 }, { w: 22, h: 36 }
+    ];
+    const count = score > 300 && Math.random() < 0.35 ? (Math.random() < 0.4 ? 3 : 2) : 1;
+    let x = W + 20;
+    for (let i = 0; i < count; i++) {
+      const k = kinds[Math.floor(Math.random() * kinds.length)];
+      obstacles.push({ x, w: k.w, h: k.h, arms: Math.random() < 0.5 ? 1 : -1 });
+      x += k.w + 4;
+    }
+    const minGap = 55 + 260 / speed;
+    spawnIn = minGap + Math.random() * 70;
+  }
+
+  function hit(o) {
+    // forgiving hitbox
+    const dx = dino.x + 8, dy = dino.y - dino.h + 6, dw = dino.w - 16, dh = dino.h - 8;
+    const ox = o.x + 3, oy = GROUND - o.h + 3, ow = o.w - 6, oh = o.h - 3;
+    return dx < ox + ow && dx + dw > ox && dy < oy + oh && dy + dh > oy;
+  }
+
+  function update() {
+    t++;
+    if (state !== 'running') return;
+    speed = Math.min(15, 6 + score / 250);
+    score += speed * 0.08;
+
+    dino.vy += dino.fastDrop && !dino.onGround ? 1.8 : 0.7;
+    dino.y += dino.vy;
+    if (dino.y >= GROUND) { dino.y = GROUND; dino.vy = 0; dino.onGround = true; }
+
+    groundOff = (groundOff + speed) % 40;
+    clouds.forEach(c => { c.x -= speed * 0.15; if (c.x < -80) c.x = W + Math.random() * 120; });
+
+    if (--spawnIn <= 0) spawn();
+    obstacles.forEach(o => o.x -= speed);
+    obstacles = obstacles.filter(o => o.x + o.w > -10);
+
+    if (obstacles.some(hit)) {
+      state = 'over';
+      if (score > hi) { hi = Math.floor(score); try { localStorage.setItem('sunsetRunnerHi', hi); } catch (e) {} }
+      hiEl.textContent = pad(hi);
+    }
+    scoreEl.textContent = pad(score);
+  }
+
+  // ---------- drawing ----------
+  function drawSky() {
+    const g = ctx.createLinearGradient(0, 0, 0, GROUND);
+    g.addColorStop(0, C.skyT); g.addColorStop(1, C.skyB);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // low sun
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.beginPath(); ctx.arc(660, 120, 46, 0, Math.PI * 2); ctx.fill();
+    // distant mesas
+    ctx.fillStyle = 'rgba(184,96,31,0.28)';
+    ctx.beginPath(); ctx.moveTo(0, GROUND);
+    [[0,170],[60,170],[80,150],[180,150],[200,175],[360,175],[380,140],[470,140],[490,170],[640,170],[660,155],[760,155],[780,172],[800,172],[800,GROUND]]
+      .forEach(([x,y]) => ctx.lineTo(x, y));
+    ctx.fill();
+    // clouds
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    clouds.forEach(c => {
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, 30, 9, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x + 18, c.y - 6, 18, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  function drawGround() {
+    ctx.fillStyle = C.sand; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = C.sandD; ctx.fillRect(0, GROUND, W, 3);
+    ctx.fillStyle = 'rgba(74,36,8,0.35)';
+    for (let x = -groundOff; x < W; x += 40) {
+      ctx.fillRect(x + 6, GROUND + 12, 10, 2);
+      ctx.fillRect(x + 26, GROUND + 24, 5, 2);
+    }
+  }
+
+  function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); }
+
+  // Original chunky, rounded dinosaur
+  function drawDino() {
+    const x = dino.x, base = dino.y;
+    const running = state === 'running' && dino.onGround;
+    const step = running && !reduce ? Math.floor(t / 5) % 2 : 0;
+    const bob = running && !reduce ? (step ? 1 : 0) : 0;
+    const y = base - 46 + bob;
+
+    // tail
+    ctx.fillStyle = C.dino;
+    ctx.beginPath(); ctx.moveTo(x + 2, y + 22); ctx.quadraticCurveTo(x - 14, y + 18, x - 12, y + 32); ctx.lineTo(x + 8, y + 34); ctx.fill();
+    // back plates
+    ctx.fillStyle = C.dinoD;
+    [[10,10],[18,6],[26,8]].forEach(([dx, dy]) => {
+      ctx.beginPath(); ctx.moveTo(x + dx - 4, y + dy + 8); ctx.lineTo(x + dx, y + dy); ctx.lineTo(x + dx + 4, y + dy + 8); ctx.fill();
+    });
+    // body
+    ctx.fillStyle = C.dino; rr(x, y + 12, 34, 26, 13);
+    // belly
+    ctx.fillStyle = 'rgba(255,240,210,0.7)'; rr(x + 14, y + 24, 16, 12, 6);
+    // head
+    ctx.fillStyle = C.dino; rr(x + 24, y, 22, 20, 9);
+    // eye
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 37, y + 8, 4.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = C.ink; ctx.beginPath();
+    if (state === 'over') { ctx.lineWidth = 2; ctx.strokeStyle = C.ink; ctx.moveTo(x + 34, y + 5); ctx.lineTo(x + 40, y + 11); ctx.moveTo(x + 40, y + 5); ctx.lineTo(x + 34, y + 11); ctx.stroke(); }
+    else { ctx.arc(x + 38, y + 8, 2.2, 0, Math.PI * 2); ctx.fill(); }
+    // smile + nostril
+    ctx.fillStyle = C.dinoD; ctx.fillRect(x + 36, y + 15, 7, 2); ctx.fillRect(x + 42, y + 5, 2, 2);
+    // little arm
+    ctx.fillStyle = C.dinoD; rr(x + 30, y + 24, 7, 4, 2);
+    // legs
+    ctx.fillStyle = C.dinoD;
+    const l1 = step ? 4 : 8, l2 = step ? 8 : 4;
+    rr(x + 8, y + 34, 8, l1 + 4, 3);
+    rr(x + 20, y + 34, 8, l2 + 4, 3);
+  }
+
+  function drawCactus(o) {
+    const x = o.x, top = GROUND - o.h, w = o.w, armH = Math.round(o.h * 0.35);
+    ctx.fillStyle = C.cac;
+    const trunkW = Math.round(w * 0.45), tx = x + (w - trunkW) / 2;
+    rr(tx, top, trunkW, o.h, trunkW / 2);
+    // arms
+    const ay = top + o.h * 0.3;
+    rr(x, ay + armH * 0.4, tx - x + 2, 5, 2);
+    rr(x, ay - 2, 5, armH, 2.5);
+    rr(tx + trunkW - 2, ay + armH * 0.7, x + w - (tx + trunkW) + 2, 5, 2);
+    rr(x + w - 5, ay + 4, 5, armH, 2.5);
+    // ribs
+    ctx.fillStyle = C.cacD;
+    ctx.fillRect(tx + trunkW / 2 - 1, top + 5, 2, o.h - 8);
+  }
+
+  function centreText(lines) {
+    ctx.fillStyle = 'rgba(255,241,224,0.82)';
+    rr(W / 2 - 200, 52, 400, 90, 10);
+    ctx.fillStyle = C.ink; ctx.textAlign = 'center';
+    ctx.font = '16px "Press Start 2P", monospace';
+    ctx.fillText(lines[0], W / 2, 90);
+    ctx.font = '10px "Press Start 2P", monospace';
+    ctx.fillText(lines[1], W / 2, 118);
+  }
+
+  function draw() {
+    drawSky(); drawGround();
+    obstacles.forEach(drawCactus);
+    drawDino();
+    if (state === 'ready') centreText(['READY?', 'SPACE OR TAP TO START']);
+    if (state === 'over') centreText(['GAME OVER', 'SPACE OR TAP TO RUN AGAIN']);
+  }
+
+  // fixed-step loop so speed is the same on 60Hz and 120Hz screens
+  let last = performance.now(), acc = 0;
+  function loop(now) {
+    acc += Math.min(100, now - last); last = now;
+    while (acc >= 1000 / 60) { update(); acc -= 1000 / 60; }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  document.fonts?.ready.then(draw);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
