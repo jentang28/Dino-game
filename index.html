@@ -39,7 +39,7 @@ body {
 .wrap { width: 100%; max-width: 860px; display: grid; gap: 14px; }
 header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
 h1 { font-family: var(--font-display); font-size: clamp(14px, 3vw, 20px); margin: 0; letter-spacing: 0.02em; text-wrap: balance; }
-.scores { font-family: var(--font-display); font-size: 12px; display: flex; gap: 16px; font-variant-numeric: tabular-nums; }
+.scores { font-family: var(--font-display); font-size: 12px; display: flex; flex-wrap: wrap; gap: 8px 16px; font-variant-numeric: tabular-nums; }
 .scores span { opacity: .7; }
 canvas {
   width: 100%;
@@ -82,10 +82,11 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
 <div class="wrap">
   <header>
     <h1>Sunset Dino Runner</h1>
-    <div class="scores"><div><span>LV</span> <b id="lv">1</b></div><div><span>HI</span> <b id="hi">00000</b></div><div><span>SCORE</span> <b id="score">00000</b></div></div>
+    <div class="scores"><div><span>LV</span> <b id="lv">1</b></div><div><span>COINS</span> <b id="coins">0</b></div><div><span>HI</span> <b id="hi">00000</b></div><div><span>SCORE</span> <b id="score">00000</b></div></div>
   </header>
   <canvas id="game" width="800" height="240" tabindex="0" aria-label="Dino runner game. Press space or tap to jump, hold down arrow to duck."></canvas>
   <p class="help">Press <kbd>Space</kbd> or <kbd>↑</kbd> to jump. Hold <kbd>↓</kbd> to duck, or to drop faster mid-air. On a phone, tap to jump and hold the bottom of the game to duck.</p>
+  <p class="help"><b>Pick-ups:</b> gold coins are worth half an obstacle at your level. Rare green gems are worth five obstacles, and a rare shield saves you from one crash.</p>
   <ol class="levels" aria-label="Levels">
     <li><b>Lv 1</b> Desert Walk<span>cacti · 10 pts each</span></li>
     <li><b>Lv 2</b> Cactus Patch<span>clusters, rocks · 20 pts · from 200</span></li>
@@ -132,15 +133,18 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
     { n: 3, name: 'BIRD ALLEY',   from: 600,  pts: 40, speed: [9, 10.5],   ramp: 25, gap: 0.8,  sky: ['#f47f45', '#ffc98f'], types: ['cactus', 'cluster', 'rock', 'bird', 'bird'] },
     { n: 4, name: 'DUST STORM',   from: 1600, pts: 80, speed: [10.5, 13.5], ramp: 40, gap: 0.72, sky: ['#d9763a', '#f2c08a'], types: ['cluster', 'cactus', 'bird', 'tumble', 'tumble'] }
   ];
-  const lvEl = document.getElementById('lv');
+  const lvEl = document.getElementById('lv'), coinEl = document.getElementById('coins');
 
   const dino = { x: 70, y: GROUND, vy: 0, onGround: true, down: false };
   let state = 'ready'; // ready | running | over
   let speed, score, level, clearedInLevel, obstacles, spawnIn, groundOff, t, clouds, banner, dust;
+  let pickups, coins, shield, invuln, pops, tokenIn;
 
   function reset() {
     score = 0; level = 0; clearedInLevel = 0; speed = LEVELS[0].speed[0];
     obstacles = []; spawnIn = 60; groundOff = 0; t = 0; banner = 0;
+    pickups = []; coins = 0; shield = false; invuln = 0; pops = []; tokenIn = 12 + Math.floor(Math.random() * 8);
+    coinEl.textContent = '0';
     dino.y = GROUND; dino.vy = 0; dino.onGround = true;
     clouds = [0, 1, 2].map(i => ({ x: 120 + i * 280, y: 30 + (i % 2) * 28 }));
     dust = Array.from({ length: 40 }, () => ({ x: Math.random() * W, y: Math.random() * GROUND, s: 0.6 + Math.random() * 1.4 }));
@@ -203,8 +207,86 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
     } else {
       obstacles.push({ type: 'tumble', x, w: 30, h: 30, top: GROUND - 30, by: 0, bvy: -6, roll: 0 });
     }
+    addPickups(obstacles[obstacles.length - 1]);
     const base = (55 + 260 / speed) * L.gap;
     spawnIn = base + Math.random() * 70 * L.gap;
+  }
+
+
+  // ---------- coins and special tokens ----------
+  function addPickups(o) {
+    if (--tokenIn <= 0) {
+      tokenIn = 14 + Math.floor(Math.random() * 10);
+      const kind = shield || Math.random() < 0.5 ? 'gem' : 'shield';
+      // float the token in the gap after this obstacle, at jump height
+      pickups.push({ kind, x: o.x + o.w + 150, y: GROUND - 95, vx: 0 });
+      return;
+    }
+    if (Math.random() > 0.55) return;
+    if (o.type === 'bird' || o.type === 'tumble') {
+      // a line of coins along the ground ahead of the obstacle
+      for (let i = 0; i < 4; i++) pickups.push({ kind: 'coin', x: o.x - 200 + i * 28, y: GROUND - 18, vx: 0 });
+    } else {
+      // an arc that follows a well-timed jump over the obstacle
+      const mid = o.x + o.w / 2, n = 5;
+      for (let i = 0; i < n; i++) {
+        const f = i / (n - 1), x = mid - 90 + f * 180;
+        pickups.push({ kind: 'coin', x, y: GROUND - 40 - Math.sin(f * Math.PI) * 70, vx: 0 });
+      }
+    }
+  }
+  function collect(p) {
+    const L = LEVELS[level];
+    let pts = 0, label;
+    if (p.kind === 'coin') { pts = L.pts / 2; coins++; coinEl.textContent = String(coins); label = '+' + pts; }
+    else if (p.kind === 'gem') { pts = L.pts * 5; label = 'GEM +' + pts; }
+    else { shield = true; label = 'SHIELD!'; }
+    score += pts;
+    pops.push({ x: p.x, y: p.y - 10, life: 40, label });
+    const next = LEVELS[level + 1];
+    if (next && score >= next.from) { level++; clearedInLevel = 0; banner = 150; lvEl.textContent = String(level + 1); }
+  }
+  function touches(p) {
+    const d = dinoBox(), r = p.kind === 'coin' ? 9 : 13;
+    return d.x - 4 < p.x + r && d.x + d.w + 4 > p.x - r && d.y - 4 < p.y + r && d.y + d.h + 4 > p.y - r;
+  }
+  function updatePickups() {
+    pickups.forEach(p => { p.x -= speed; if (!p.got && touches(p)) { p.got = true; collect(p); } });
+    pickups = pickups.filter(p => !p.got && p.x > -20);
+    pops.forEach(p => { p.life--; p.y -= 0.6; });
+    pops = pops.filter(p => p.life > 0);
+  }
+  function drawPickups() {
+    pickups.forEach(p => {
+      const bob = reduce ? 0 : Math.sin((t + p.x) / 10) * 2;
+      if (p.kind === 'coin') {
+        const squeeze = reduce ? 1 : 0.55 + 0.45 * Math.abs(Math.cos((t + p.x) / 12));
+        ctx.fillStyle = '#c98a00'; ctx.beginPath(); ctx.ellipse(p.x, p.y + bob, 9 * squeeze, 9, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.ellipse(p.x, p.y + bob, 6.5 * squeeze, 6.5, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff6c2'; ctx.fillRect(p.x - 1, p.y + bob - 4, 2 * squeeze, 4);
+      } else if (p.kind === 'gem') {
+        const y = p.y + bob;
+        ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.arc(p.x, y, 16, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = C.cac; ctx.beginPath(); ctx.moveTo(p.x, y - 12); ctx.lineTo(p.x + 10, y - 3); ctx.lineTo(p.x, y + 12); ctx.lineTo(p.x - 10, y - 3); ctx.fill();
+        ctx.fillStyle = '#7ee08f'; ctx.beginPath(); ctx.moveTo(p.x, y - 12); ctx.lineTo(p.x + 4, y - 3); ctx.lineTo(p.x, y + 4); ctx.lineTo(p.x - 4, y - 3); ctx.fill();
+      } else {
+        const y = p.y + bob;
+        ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.beginPath(); ctx.arc(p.x, y, 14, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = C.dino; ctx.lineWidth = 3; ctx.stroke();
+        ctx.fillStyle = C.dinoD; ctx.beginPath(); ctx.moveTo(p.x - 7, y - 7); ctx.lineTo(p.x + 7, y - 7); ctx.lineTo(p.x + 7, y); ctx.quadraticCurveTo(p.x + 7, y + 7, p.x, y + 9); ctx.quadraticCurveTo(p.x - 7, y + 7, p.x - 7, y); ctx.fill();
+      }
+    });
+  }
+  function drawShield() {
+    if (!shield && !(invuln > 0 && Math.floor(invuln / 4) % 2)) return;
+    const d = dinoBox();
+    ctx.strokeStyle = shield ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(d.x + d.w / 2, d.y + d.h / 2 - 2, d.w / 2 + 14, d.h / 2 + 12, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  function drawPops() {
+    ctx.textAlign = 'center'; ctx.font = '10px "Press Start 2P", monospace';
+    pops.forEach(p => { ctx.fillStyle = 'rgba(74,36,8,' + Math.min(1, p.life / 20) + ')'; ctx.fillText(p.label, p.x, p.y); });
   }
 
   function dinoBox() {
@@ -249,12 +331,19 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
       }
     });
     obstacles = obstacles.filter(o => o.x + o.w > -20);
+    updatePickups();
+    if (invuln > 0) invuln--;
 
-    if (obstacles.some(hit)) {
+    const crash = invuln > 0 ? null : obstacles.find(hit);
+    if (crash && shield) {
+      shield = false; invuln = 60; crash.scored = true;
+      obstacles = obstacles.filter(o => o !== crash);
+      pops.push({ x: crash.x + crash.w / 2, y: crash.top - 6, life: 40, label: 'SHIELD USED' });
+    } else if (crash) {
       state = 'over';
       if (score > hi) { hi = score; try { localStorage.setItem('sunsetRunnerHi', hi); } catch (e) {} }
       hiEl.textContent = pad(hi);
-      onGameOver(score, level + 1);
+      onGameOver(score, level + 1, coins);
     }
     scoreEl.textContent = pad(score);
   }
@@ -383,11 +472,12 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
 
   function draw() {
     drawSky(); drawDust(); drawGround();
+    drawPickups();
     obstacles.forEach(drawObstacle);
-    drawDino();
+    drawDino(); drawShield(); drawPops();
     const L = LEVELS[level];
     if (state === 'ready') centreText(['READY?', 'SPACE OR TAP TO START']);
-    else if (state === 'over') centreText(['GAME OVER', 'LEVEL ' + L.n + ' · ' + score + ' PTS · TAP TO RETRY']);
+    else if (state === 'over') centreText(['GAME OVER', 'LV ' + L.n + ' · ' + score + ' PTS · ' + coins + ' COINS']);
     else if (banner > 0) centreText(['LEVEL ' + L.n + ': ' + L.name, L.pts + ' PTS PER OBSTACLE']);
   }
 
@@ -411,7 +501,7 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
     try {
       const r = await fetch(SB_URL + '/rest/v1/dino_scores?select=name,score,level&order=score.desc,created_at.asc&limit=10', { headers: SB_HEAD });
       if (!r.ok) throw new Error(r.status);
-      const rows = await r.json();
+      const rows = (await r.json()).sort((a, b) => b.score - a.score);
       list.replaceChildren();
       if (!rows.length) { list.append(row('', 'No scores yet. Be the first!', '')); return; }
       rows.forEach((x, i) => list.append(row('#' + (i + 1), x.name, pad(x.score), 'LV' + (x.level || 1))));
@@ -420,10 +510,10 @@ ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: cen
     }
   }
   let pendingLevel = 1;
-  function onGameOver(s, lv) {
+  function onGameOver(s, lv, c = 0) {
     pending = s; pendingLevel = lv;
     saveBtn.disabled = s < 1;
-    note.textContent = s < 1 ? 'Clear at least one obstacle to save a score.' : 'You reached level ' + lv + ' with ' + s + ' points. Add your name and press Save.';
+    note.textContent = s < 1 ? 'Clear at least one obstacle to save a score.' : 'You reached level ' + lv + ' with ' + s + ' points and ' + c + (c === 1 ? ' coin' : ' coins') + '. Add your name and press Save.';
   }
   form.addEventListener('submit', async e => {
     e.preventDefault();

@@ -10,6 +10,12 @@ Open `index.html` in any modern browser. No build step or install needed.
 - **↓**: duck on the ground, or drop faster in the air
 - **Phone or tablet**: tap to jump, hold the bottom of the game to duck
 
+## Coins and tokens
+
+- **Gold coins**: worth half an obstacle's points at your current level (5, 10, 20 or 40)
+- **Green gem** (rare): worth five obstacles' points
+- **Shield** (rare): absorbs one crash
+
 ## Levels
 
 You score points for each obstacle you clear. Each level brings new obstacles, more speed and more points per obstacle.
@@ -25,4 +31,4 @@ Your high score is saved in your browser's local storage.
 
 ## Leaderboard
 
-After a run, type a name and press **Save** to add your score to the shared top 10, along with the level you reached. Scores are stored in the Supabase table `dino_scores`, which anyone can read and add to but nobody can edit or delete through the game.
+After a run, type a name and press **Save** to add your score to the shared top 10, ranked from highest to lowest score, along with the level you reached. Scores are stored in the Supabase table `dino_scores`, which anyone can read and add to but nobody can edit or delete through the game.
