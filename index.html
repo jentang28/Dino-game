@@ -55,6 +55,21 @@ canvas {
 canvas:focus-visible { box-shadow: 0 0 0 4px var(--dino); }
 .help { font-size: 14px; margin: 0; line-height: 1.5; }
 kbd { font-family: var(--font-display); font-size: 10px; background: #fff; border: 2px solid var(--ink); border-radius: 4px; padding: 2px 6px; }
+.board { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
+.panel { background: #fff; border: 3px solid var(--ink); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.panel h2 { font-family: var(--font-display); font-size: 12px; margin: 0 0 12px; letter-spacing: .04em; }
+#submit { display: flex; gap: 8px; flex-wrap: wrap; }
+#submit input { flex: 1 1 140px; min-width: 0; font: inherit; font-size: 16px; padding: 8px 10px; border: 2px solid var(--ink); border-radius: 6px; background: var(--page); color: var(--ink); }
+#submit button { font-family: var(--font-display); font-size: 11px; padding: 10px 14px; border: 2px solid var(--ink); border-radius: 6px; background: var(--dino); color: #fff; cursor: pointer; }
+#submit button:disabled { opacity: .5; cursor: default; }
+#submit input:focus-visible, #submit button:focus-visible { outline: 3px solid var(--cactus); outline-offset: 2px; }
+.note { font-size: 14px; margin: 8px 0 0; }
+ol#top { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-variant-numeric: tabular-nums; }
+ol#top li { display: grid; grid-template-columns: 2.2em 1fr auto; gap: 8px; padding: 4px 0; border-bottom: 1px dashed rgba(74,36,8,.25); }
+ol#top li:last-child { border-bottom: 0; }
+ol#top .rank { font-family: var(--font-display); font-size: 10px; align-self: center; }
+ol#top .who { overflow-wrap: anywhere; }
+ol#top .pts { font-family: var(--font-display); font-size: 11px; align-self: center; }
 </style>
 </head>
 <body>
@@ -66,6 +81,20 @@ kbd { font-family: var(--font-display); font-size: 10px; background: #fff; borde
   </header>
   <canvas id="game" width="800" height="240" tabindex="0" aria-label="Dino runner game. Press space or tap to jump."></canvas>
   <p class="help">Press <kbd>Space</kbd> or <kbd>↑</kbd> to jump, hold <kbd>↓</kbd> to drop faster. On a phone, tap the game. The pace picks up as your score climbs.</p>
+  <div class="board">
+    <section class="panel" aria-labelledby="save-h">
+      <h2 id="save-h">SAVE YOUR SCORE</h2>
+      <form id="submit" autocomplete="off">
+        <input id="player" name="player" maxlength="20" placeholder="Your name" aria-label="Your name" required>
+        <button id="saveBtn" type="submit" disabled>SAVE</button>
+      </form>
+      <p class="note" id="saveNote" aria-live="polite">Finish a run to save your score.</p>
+    </section>
+    <section class="panel" aria-labelledby="top-h">
+      <h2 id="top-h">TOP 10</h2>
+      <ol id="top"><li><span></span><span class="who">Loading scores…</span><span></span></li></ol>
+    </section>
+  </div>
 </div>
 
 <script>
@@ -98,15 +127,17 @@ kbd { font-family: var(--font-display); font-size: 10px; background: #fff; borde
   reset();
 
   function jump() {
-    if (state === 'ready' || state === 'over') { reset(); state = 'running'; return; }
+    if (state === 'ready' || state === 'over') { reset(); state = 'running'; saveBtn.disabled = true; if (pending) note.textContent = 'Unsaved score discarded. Finish this run to save a new one.'; pending = 0; return; }
     if (dino.onGround) { dino.vy = -13.2; dino.onGround = false; }
   }
 
   addEventListener('keydown', e => {
+    if (e.target.closest && e.target.closest('input, button, textarea')) return;
     if (['Space','ArrowUp','KeyW'].includes(e.code)) { e.preventDefault(); if (!e.repeat) jump(); }
     if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); dino.fastDrop = true; }
   });
-  addEventListener('keyup', e => { if (e.code === 'ArrowDown' || e.code === 'KeyS') dino.fastDrop = false; });
+  addEventListener('keyup', e => {
+    if (e.target.closest && e.target.closest('input, button, textarea')) return; if (e.code === 'ArrowDown' || e.code === 'KeyS') dino.fastDrop = false; });
   cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.focus(); jump(); });
 
   function spawn() {
@@ -152,6 +183,7 @@ kbd { font-family: var(--font-display); font-size: 10px; background: #fff; borde
       state = 'over';
       if (score > hi) { hi = Math.floor(score); try { localStorage.setItem('sunsetRunnerHi', hi); } catch (e) {} }
       hiEl.textContent = pad(hi);
+      onGameOver(Math.floor(score));
     }
     scoreEl.textContent = pad(score);
   }
@@ -263,6 +295,60 @@ kbd { font-family: var(--font-display); font-size: 10px; background: #fff; borde
     if (state === 'ready') centreText(['READY?', 'SPACE OR TAP TO START']);
     if (state === 'over') centreText(['GAME OVER', 'SPACE OR TAP TO RUN AGAIN']);
   }
+
+
+  // ---------- shared leaderboard (Supabase) ----------
+  const SB_URL = 'https://htvpljrhdgsicivvvqzd.supabase.co';
+  const SB_KEY = 'sb_publishable_f__-k8p5YEUnz2dNBD0BmQ_k56Pmnw7';
+  const SB_HEAD = { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' };
+  const form = document.getElementById('submit'), nameIn = document.getElementById('player');
+  const saveBtn = document.getElementById('saveBtn'), note = document.getElementById('saveNote');
+  const list = document.getElementById('top');
+  let pending = 0;
+  try { nameIn.value = localStorage.getItem('sunsetRunnerName') || ''; } catch (e) {}
+
+  function row(rank, who, pts) {
+    const li = document.createElement('li');
+    [['rank', rank], ['who', who], ['pts', pts]].forEach(([c, v]) => { const sp = document.createElement('span'); sp.className = c; sp.textContent = v; li.append(sp); });
+    return li;
+  }
+  async function loadTop() {
+    try {
+      const r = await fetch(SB_URL + '/rest/v1/dino_scores?select=name,score&order=score.desc,created_at.asc&limit=10', { headers: SB_HEAD });
+      if (!r.ok) throw new Error(r.status);
+      const rows = await r.json();
+      list.replaceChildren();
+      if (!rows.length) { list.append(row('', 'No scores yet. Be the first!', '')); return; }
+      rows.forEach((x, i) => list.append(row('#' + (i + 1), x.name, pad(x.score))));
+    } catch (e) {
+      list.replaceChildren(row('', 'Couldn’t load scores. Check your connection and refresh.', ''));
+    }
+  }
+  function onGameOver(s) {
+    pending = s;
+    saveBtn.disabled = s < 1;
+    note.textContent = s < 1 ? 'Score at least 1 point to save.' : 'You scored ' + s + '. Add your name and press Save.';
+  }
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = nameIn.value.trim();
+    if (!name) { note.textContent = 'Type a name first.'; nameIn.focus(); return; }
+    if (!pending) return;
+    saveBtn.disabled = true; note.textContent = 'Saving…';
+    try {
+      const r = await fetch(SB_URL + '/rest/v1/dino_scores', { method: 'POST', headers: { ...SB_HEAD, Prefer: 'return=minimal' }, body: JSON.stringify({ name, score: pending }) });
+      if (!r.ok) throw new Error(r.status);
+      try { localStorage.setItem('sunsetRunnerName', name); } catch (e) {}
+      note.textContent = 'Saved ' + pending + ' points for ' + name + '.';
+      pending = 0;
+      loadTop();
+      cv.focus();
+    } catch (err) {
+      saveBtn.disabled = false;
+      note.textContent = 'Couldn’t save that score. Check your connection and try again.';
+    }
+  });
+  loadTop();
 
   // fixed-step loop so speed is the same on 60Hz and 120Hz screens
   let last = performance.now(), acc = 0;
